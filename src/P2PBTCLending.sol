@@ -4,6 +4,8 @@ pragma solidity ^0.8.13;
 import "./IBitcoinLightClient.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "bitcoin-spv/solidity/contracts/ValidateSPV.sol";
+import "bitcoin-spv/solidity/contracts/BTCUtils.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 
 contract P2PBTCLending is ReentrancyGuard {
@@ -19,6 +21,7 @@ contract P2PBTCLending is ReentrancyGuard {
 
     struct BorrowRequest {
         uint256 amount;
+        uint256 collateral;
         uint256 interestRate;
         bytes btcAddress;
         bool active;
@@ -65,6 +68,7 @@ contract P2PBTCLending is ReentrancyGuard {
 
         borrowRequests[msg.sender] = BorrowRequest({
             amount: amount,
+            collateral: collateralAmount,
             interestRate: interestRate,
             btcAddress: btcAddress,
             active: true
@@ -74,11 +78,9 @@ contract P2PBTCLending is ReentrancyGuard {
     }
 
     function cancelBorrowRequest() external nonReentrant {
-        require(borrowRequests[msg.sender].active, "No active borrow request");
-        
-        uint256 collateralAmount = getCollateralAmount(borrowRequests[msg.sender].amount);
-        require(collateralToken.transfer(msg.sender, collateralAmount), "Collateral return failed");
-
+        BorrowRequest memory request = borrowRequests[msg.sender];
+        require(request.active, "No active borrow request");
+        require(collateralToken.transfer(msg.sender, request.collateral), "Collateral return failed");
         delete borrowRequests[msg.sender];
         emit BorrowRequestCancelled(msg.sender);
     }
