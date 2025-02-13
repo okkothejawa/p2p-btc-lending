@@ -8,6 +8,7 @@ import "bitcoin-spv/solidity/contracts/ValidateSPV.sol";
 import "bitcoin-spv/solidity/contracts/BTCUtils.sol";
 import "./interfaces/AggregatorV3Interface.sol";
 
+// TODO: Pool system similar to coinjoins
 contract P2PBTCLending is ReentrancyGuard {
     IBitcoinLightClient public lightClient = IBitcoinLightClient(address(0x3100000000000000000000000000000000000001));
     IERC20 public immutable collateralToken;
@@ -24,6 +25,7 @@ contract P2PBTCLending is ReentrancyGuard {
         uint256 collateral;
         uint256 interestRate;
         bytes btcAddress;
+        bytes signedPsbt;
         bool active;
     }
 
@@ -58,7 +60,7 @@ contract P2PBTCLending is ReentrancyGuard {
         btcPriceFeed = AggregatorV3Interface(_btcPriceFeed);
     }
 
-    function requestBorrow(uint256 amount, uint256 interestRate, bytes memory btcAddress) external nonReentrant {
+    function requestBorrow(uint256 amount, uint256 interestRate, bytes memory btcAddress, bytes memory signedPsbt) external nonReentrant {
         require(amount > 0, "Amount must be greater than 0");
         require(btcAddress.length > 0, "Invalid BTC address");
         require(!borrowRequests[msg.sender].active, "Active borrow request exists");
@@ -71,6 +73,7 @@ contract P2PBTCLending is ReentrancyGuard {
             collateral: collateralAmount,
             interestRate: interestRate,
             btcAddress: btcAddress,
+            signedPsbt: signedPsbt,
             active: true
         });
 
