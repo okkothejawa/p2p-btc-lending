@@ -21,6 +21,18 @@ const BorrowBtcIntent = () => {
   const [currentNetwork, setCurrentNetwork] = useState('');
   const [balance, setBalance] = useState(0);
 
+  interface addressUTXO {
+    txid: string;
+    vout: number;
+    value: number;
+    status: {
+      confirmed: boolean;
+      block_height: number;
+      block_hash: string;
+      block_time: number;
+    };
+  }
+
   useEffect(() => {
     checkUnisatAvailability();
   }, []);
@@ -112,20 +124,68 @@ const BorrowBtcIntent = () => {
 
   const createAndSignIntent = async () => {
     if (!validateInputs()) return;
-
+    
     try {
       // Get UTXOs from UniSat wallet
-      const utxos = await window.unisat.getUtxos();
+      const response = await fetch(`https://mempool.space/testnet4/api/address/${connectedAddress}/utxo`);
+      const utxos: addressUTXO[] = await response.json();
       
       // Find a UTXO close to 330 sats
-      const dustUtxo = utxos.find(utxo => utxo.value >= 330 && utxo.value <= 1000);
+      let dustUtxo = utxos.find(utxo => utxo.value >= 330 && utxo.value <= 1000);
       
+      // If no suitable dust UTXO found, create one
       if (!dustUtxo) {
-        setError('No suitable dust UTXO found. Need a UTXO of ~330 sats.');
-        return;
+        // Find a larger UTXO to split
+        const sourceUtxo = utxos.find(utxo => utxo.value > 1000);
+        if (!sourceUtxo) {
+          setError('No suitable UTXO found to create dust. Need a UTXO larger than 1000 sats.');
+          return;
+        }
+  
+        // Create simple transaction for splitting UTXO
+        const splitTx = {
+          inputs: [{
+            txid: sourceUtxo.txid,
+            vout: sourceUtxo.vout
+          }],
+          outputs: [{
+            address: connectedAddress,
+            value: 330
+          }, {
+            address: connectedAddress,
+            value: sourceUtxo.value - 330 - 300 // 300 sats fee
+          }]
+        };
+  
+        // Sign and broadcast the split transaction
+        const splitTxId = await window.unisat.sendBitcoin(
+          splitTx.outputs[0].address, 
+          splitTx.outputs[0].value,
+          {
+            feeRate: 1 // 1 sat/vB
+          }
+        );
+        
+        // Wait for transaction to be included in mempool
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        
+        // Refresh UTXOs
+        const newResponse = await fetch(`https://mempool.space/testnet4/api/address/${connectedAddress}/utxo`);
+        const newUtxos: addressUTXO[] = await newResponse.json();
+        
+        // Find our newly created dust UTXO
+        dustUtxo = newUtxos.find(utxo => 
+          utxo.txid === splitTxId && 
+          utxo.value === 330
+        );
+        
+        if (!dustUtxo) {
+          setError('Failed to find newly created dust UTXO in mempool');
+          return;
+        }
       }
-
-      // Create new PSBT
+  
+      // Create new PSBT for the borrow intent
       let psbt = new bitcoin.Psbt({ network: bitcoin.networks.testnet });
       
       // Add the dust input
@@ -133,28 +193,50 @@ const BorrowBtcIntent = () => {
         hash: dustUtxo.txid,
         index: dustUtxo.vout,
         witnessUtxo: {
-          script: Buffer.from(dustUtxo.scriptPk, 'hex'),
+          script: bitcoin.address.toOutputScript(connectedAddress, bitcoin.networks.testnet),
           value: dustUtxo.value
         }
       });
 
+      console.log("ok");
+  
       // Add output for the borrow amount
-      // This would typically go to the lender's address, but for this example we'll send back to our address
       psbt.addOutput({
         address: connectedAddress,
         value: Number(borrowAmount)
       });
-
+  
       // Convert PSBT to base64
       const psbtBase64 = psbt.toBase64();
-
+      
       // Sign with UniSat wallet
       const signedResult = await window.unisat.signPsbt(psbtBase64, {
         signingIndexes: [0],
-        sighashTypes: [0x83], // SIGHASH_SINGLE|SIGHASH_ANYONECANPAY
+        sighashTypes: [0x83], // SIGHASH_SINGLE|ANYONECANPAY
       });
-      
+  
       setSignedPsbt(signedResult);
+
+      // Add new input to this PSBT to test the finalization
+      // Write this signed psbt to Citrea and then listen to events in another component
+
+      // Add new input to signed PSBT
+      const signedPsbtObj = bitcoin.Psbt.fromBase64(signedResult);
+      
+      signedPsbtObj.addInput({
+        hash: dustUtxo.txid,
+        index: dustUtxo.vout,
+        witnessUtxo: {
+          script: bitcoin.address.toOutputScript(connectedAddress, bitcoin.networks.testnet),
+          value: dustUtxo.value
+        }
+      });
+      // Sign the new input
+      const signedFinalResult = await window.unisat.signPsbt(signedPsbtObj.toBase64(), {
+        signingIndexes: [1],
+        sighashTypes: [0x83], // SIGHASH_SINGLE|ANYONECANPAY
+      });
+      console.log(signedFinalResult);
       setSuccess('Borrow intent created and signed successfully!');
       setError('');
     } catch (err) {

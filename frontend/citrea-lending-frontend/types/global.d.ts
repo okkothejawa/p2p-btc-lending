@@ -26,5 +26,8 @@ interface UTXOType {
         addresses: string[];
       }) => Promise<string>;
       signPsbt: (psbtBase64: string, options?: { sighashType?: number }) => Promise<string>;
+      sendBitcoin: (toAddress: string, satoshis: number, options?: { 
+        feeRate?: number;
+      }) => Promise<string>;
     }
   }
