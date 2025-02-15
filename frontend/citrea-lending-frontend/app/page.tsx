@@ -7,6 +7,8 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import Link from 'next/link';
 
 const invoices = [
   {
@@ -56,6 +58,24 @@ const invoices = [
 export default function Home() {
   return (
     <main className="flex flex-col w-full h-full pt-20">
+      <div className="flex justify-end mb-4 px-4 gap-4">
+        <Link href="/lender-fill">
+          <Button 
+            variant="outline"
+            className="font-bold px-6 py-2"
+          >
+            Fill Borrow Request
+          </Button>
+        </Link>
+        <Link href="/borrow-request">
+          <Button 
+            variant="default"
+            className="bg-primary text-primary-foreground hover:bg-primary/90 font-bold px-6 py-2"
+          >
+            Create Borrow Request
+          </Button>
+        </Link>
+      </div>
       <Card className="p-10 border rounded-xl w-full bg-transparent text-white">
         <Table>
           <TableHeader>

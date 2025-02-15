@@ -7,8 +7,10 @@ import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Wallet, ArrowRight, AlertCircle, DollarSign, Lock } from 'lucide-react';
 import * as bitcoin from "bitcoinjs-lib";
+import { useAccount, useWriteContract } from 'wagmi';
+import { parseEther } from 'viem';
 
-const BorrowBtcIntent = () => {
+const BorrowRequest = () => {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [signedPsbt, setSignedPsbt] = useState('');
@@ -20,6 +22,10 @@ const BorrowBtcIntent = () => {
   const [interestRate, setInterestRate] = useState('');
   const [currentNetwork, setCurrentNetwork] = useState('');
   const [balance, setBalance] = useState(0);
+
+  // EVM wallet state from RainbowKit
+  const { address: evmAddress, isConnected: isEvmConnected } = useAccount();
+  const { writeContract, isPending } = useWriteContract();
 
   interface addressUTXO {
     txid: string;
@@ -192,52 +198,74 @@ const BorrowBtcIntent = () => {
       psbt.addInput({
         hash: dustUtxo.txid,
         index: dustUtxo.vout,
+        sequence: 0xfffffffd, // Enable RBF
         witnessUtxo: {
           script: bitcoin.address.toOutputScript(connectedAddress, bitcoin.networks.testnet),
           value: dustUtxo.value
         }
       });
 
-      console.log("ok");
-  
-      // Add output for the borrow amount
+      // Add borrower's output - this ensures the borrower gets the exact amount they requested
       psbt.addOutput({
         address: connectedAddress,
         value: Number(borrowAmount)
       });
-  
+      
       // Convert PSBT to base64
       const psbtBase64 = psbt.toBase64();
+      console.log(psbtBase64);
       
-      // Sign with UniSat wallet
+      // Sign with UniSat wallet using SIGHASH_SINGLE | ANYONECANPAY
       const signedResult = await window.unisat.signPsbt(psbtBase64, {
+        autoFinalized: false,
         signingIndexes: [0],
-        sighashTypes: [0x83], // SIGHASH_SINGLE|ANYONECANPAY
+        sighashTypes: [0x83] // SIGHASH_SINGLE | ANYONECANPAY (0x03 | 0x80)
       });
+
+      console.log(signedResult);
   
       setSignedPsbt(signedResult);
 
-      // Add new input to this PSBT to test the finalization
-      // Write this signed psbt to Citrea and then listen to events in another component
+      // If EVM wallet is connected, submit the signed PSBT to the smart contract
+      if (isEvmConnected) {
+        try {
+          // Convert BTC address to bytes by encoding it as UTF-8
+          const btcAddressBytes = `0x${Buffer.from(connectedAddress).toString('hex')}`;
+          // Convert hex (not base64) signed PSBT to bytes
+          const psbtBytes = `0x${signedResult}`;
+          console.log(psbtBytes);
 
-      // Add new input to signed PSBT
-      const signedPsbtObj = bitcoin.Psbt.fromBase64(signedResult);
-      
-      signedPsbtObj.addInput({
-        hash: dustUtxo.txid,
-        index: dustUtxo.vout,
-        witnessUtxo: {
-          script: bitcoin.address.toOutputScript(connectedAddress, bitcoin.networks.testnet),
-          value: dustUtxo.value
+          await writeContract({
+            address: '0x6469ECb9f2Bc066A4207f0fD25bfa90f501D65fB',
+            abi: [{
+              name: 'requestBorrow',
+              type: 'function',
+              stateMutability: 'nonpayable',
+              inputs: [
+                { name: 'amount', type: 'uint256' },
+                { name: 'interestRate', type: 'uint256' },
+                { name: 'btcAddress', type: 'bytes' },
+                { name: 'signedPsbt', type: 'bytes' }
+              ],
+              outputs: []
+            }],
+            functionName: 'requestBorrow',
+            args: [
+              BigInt(borrowAmount),
+              BigInt(Math.floor(parseFloat(interestRate) * 100)), // Convert to basis points
+              btcAddressBytes,
+              psbtBytes
+            ]
+          });
+          setSuccess('Borrow request submitted to smart contract!');
+        } catch (err) {
+          console.error('EVM transaction failed:', err);
+          setError('Failed to submit to smart contract. PSBT signed but not submitted.');
         }
-      });
-      // Sign the new input
-      const signedFinalResult = await window.unisat.signPsbt(signedPsbtObj.toBase64(), {
-        signingIndexes: [1],
-        sighashTypes: [0x83], // SIGHASH_SINGLE|ANYONECANPAY
-      });
-      console.log(signedFinalResult);
-      setSuccess('Borrow intent created and signed successfully!');
+      } else {
+        setSuccess('PSBT signed successfully! Please connect your EVM wallet to submit to smart contract.');
+      }
+
       setError('');
     } catch (err) {
       setError(`Failed to create borrow intent: ${err.message}`);
@@ -294,6 +322,20 @@ const BorrowBtcIntent = () => {
                     </AlertDescription>
                   </Alert>
                 )}
+
+                {isEvmConnected ? (
+                  <Alert className="bg-green-50 text-green-800 border-green-200">
+                    <AlertDescription>
+                      EVM Wallet Connected: {evmAddress?.slice(0, 6)}...{evmAddress?.slice(-4)}
+                    </AlertDescription>
+                  </Alert>
+                ) : (
+                  <Alert variant="destructive">
+                    <AlertDescription>
+                      Please connect your EVM wallet to submit the borrow request
+                    </AlertDescription>
+                  </Alert>
+                )}
               </>
             )}
 
@@ -343,10 +385,10 @@ const BorrowBtcIntent = () => {
             <Button 
               onClick={createAndSignIntent}
               className="w-full flex items-center justify-center gap-2"
-              disabled={!isWalletConnected || currentNetwork !== 'testnet'}
+              disabled={!isWalletConnected || currentNetwork !== 'testnet' || isPending}
             >
               <Lock className="h-4 w-4" />
-              Create Borrow Intent
+              {isPending ? 'Submitting to Contract...' : 'Create Borrow Intent'}
             </Button>
 
             {/* Error Display */}
@@ -395,4 +437,4 @@ const BorrowBtcIntent = () => {
   );
 };
 
-export default BorrowBtcIntent;
+export default BorrowRequest;
