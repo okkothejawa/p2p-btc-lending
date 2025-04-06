@@ -10,11 +10,16 @@ interface UTXOType {
   };
 }
 
-interface SignPsbtOptions {
-  signingIndexes?: number[];
+export interface SignPsbtOptions {
+  autoFinalized: boolean;
+  toSignInputs?: ToSignInput[];
+}
+
+export interface ToSignInput {
+  index: number;
+  address: string;
   sighashTypes?: number[];
-  autoFinalized?: boolean;
-  sighashType?: number;
+  tapLeafHashToSign?: Buffer;
 }
 
 declare global {

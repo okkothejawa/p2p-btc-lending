@@ -8,7 +8,9 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Wallet, ArrowRight, AlertCircle, DollarSign, Lock } from 'lucide-react';
 import * as bitcoin from "bitcoinjs-lib";
 import { useAccount, useWriteContract } from 'wagmi';
-import { parseEther } from 'viem';
+import * as ecc from 'tiny-secp256k1';
+import ECPairFactory from 'ecpair';
+const ECPair = ECPairFactory(ecc);
 
 const BorrowRequest = () => {
   const [error, setError] = useState('');
@@ -18,7 +20,6 @@ const BorrowRequest = () => {
   const [isUnisatAvailable, setIsUnisatAvailable] = useState(false);
   const [connectedAddress, setConnectedAddress] = useState('');
   const [borrowAmount, setBorrowAmount] = useState('');
-  const [collateralAmount, setCollateralAmount] = useState('');
   const [interestRate, setInterestRate] = useState('');
   const [currentNetwork, setCurrentNetwork] = useState('');
   const [balance, setBalance] = useState(0);
@@ -117,10 +118,6 @@ const BorrowRequest = () => {
       setError('Please enter a valid borrow amount');
       return false;
     }
-    if (!collateralAmount || isNaN(Number(collateralAmount)) || Number(collateralAmount) <= 0) {
-      setError('Please enter a valid collateral amount');
-      return false;
-    }
     if (!interestRate || isNaN(Number(interestRate)) || Number(interestRate) < 0) {
       setError('Please enter a valid interest rate');
       return false;
@@ -132,6 +129,7 @@ const BorrowRequest = () => {
     if (!validateInputs()) return;
     
     try {
+      bitcoin.initEccLib(ecc);
       // Get UTXOs from UniSat wallet
       const response = await fetch(`https://mempool.space/testnet4/api/address/${connectedAddress}/utxo`);
       const utxos: addressUTXO[] = await response.json();
@@ -198,11 +196,11 @@ const BorrowRequest = () => {
       psbt.addInput({
         hash: dustUtxo.txid,
         index: dustUtxo.vout,
-        sequence: 0xfffffffd, // Enable RBF
         witnessUtxo: {
           script: bitcoin.address.toOutputScript(connectedAddress, bitcoin.networks.testnet),
           value: dustUtxo.value
-        }
+        },
+        sighashType: 131
       });
 
       // Add borrower's output - this ensures the borrower gets the exact amount they requested
@@ -211,18 +209,17 @@ const BorrowRequest = () => {
         value: Number(borrowAmount)
       });
       
-      // Convert PSBT to base64
-      const psbtBase64 = psbt.toBase64();
-      console.log(psbtBase64);
-      
       // Sign with UniSat wallet using SIGHASH_SINGLE | ANYONECANPAY
-      const signedResult = await window.unisat.signPsbt(psbtBase64, {
+      const signedResult = await window.unisat.signPsbt(psbt.toHex(), {
         autoFinalized: false,
-        signingIndexes: [0],
-        sighashTypes: [0x83] // SIGHASH_SINGLE | ANYONECANPAY (0x03 | 0x80)
+        toSignInputs:[
+          {
+            index: 0,
+            address: connectedAddress,
+            sighashTypes: [131]
+          },
+        ]
       });
-
-      console.log(signedResult);
   
       setSignedPsbt(signedResult);
 
@@ -236,7 +233,7 @@ const BorrowRequest = () => {
           console.log(psbtBytes);
 
           await writeContract({
-            address: '0x6469ECb9f2Bc066A4207f0fD25bfa90f501D65fB',
+            address: '0x9a676e781a523b5d0c0e43731313a708cb607508',
             abi: [{
               name: 'requestBorrow',
               type: 'function',
@@ -349,20 +346,6 @@ const BorrowRequest = () => {
                 value={borrowAmount}
                 onChange={(e) => setBorrowAmount(e.target.value)}
                 placeholder="Enter amount to borrow"
-                className="font-mono"
-              />
-            </div>
-
-            {/* Collateral Amount Input */}
-            <div className="space-y-2">
-              <label className="block text-sm font-medium">
-                Collateral Amount (sats)
-              </label>
-              <Input
-                type="number"
-                value={collateralAmount}
-                onChange={(e) => setCollateralAmount(e.target.value)}
-                placeholder="Enter collateral amount"
                 className="font-mono"
               />
             </div>
