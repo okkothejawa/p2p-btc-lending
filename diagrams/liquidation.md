@@ -1,7 +1,6 @@
 sequenceDiagram
     participant Liquidator
     participant Contract
-    participant Lender
     
     Liquidator->>Contract: Trigger liquidation check
     Contract->>Contract: Verify collateral ratio is below threshold
