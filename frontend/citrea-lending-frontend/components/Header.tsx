@@ -12,7 +12,6 @@ const Header = () => {
       </Link>
       <div className="flex gap-4 items-center">
         <ConnectButton />
-        <UnisatWallet />
       </div>
     </header>
   );
