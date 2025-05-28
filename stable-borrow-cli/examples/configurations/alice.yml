@@ -1,0 +1,12 @@
+bitcoinInfo:
+  rpcUsername: testuser
+  rpcPassword: lq6zequb-gYTdF2_ZEUtr8ywTXzLYtknzWU4nV8uVoo=
+  rpcPort: 18443
+  rpcHost: localhost
+  wallet: alice
+storageDirPath: './dlc_sample_alice'
+evmPrivateKey: '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80'
+networkConfiguration:
+  peerListeningPort: 9000
+oracleConfig:
+  host: 'http://localhost:8080/'

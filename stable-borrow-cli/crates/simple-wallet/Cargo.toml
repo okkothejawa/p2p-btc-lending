@@ -1,0 +1,18 @@
+[package]
+edition = "2018"
+name = "simple-wallet"
+version = "0.1.0"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bdk_wallet = "=1.0.0-beta.5"
+bitcoin = "0.32.2"
+dlc = {path = "../dlc"}
+dlc-manager = {path = "../dlc-manager"}
+lightning = {version = "0.0.125"}
+secp256k1-zkp = {version = "0.11.0"}
+
+[dev-dependencies]
+mocks = {path = "../mocks"}
+secp256k1-zkp = {version = "0.11.0", features = ["global-context"]}

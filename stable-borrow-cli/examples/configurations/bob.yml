@@ -1,0 +1,12 @@
+bitcoinInfo:
+  rpcUsername: testuser
+  rpcPassword: lq6zequb-gYTdF2_ZEUtr8ywTXzLYtknzWU4nV8uVoo=
+  rpcPort: 18443
+  rpcHost: localhost
+  wallet: bob
+storageDirPath: './dlc_sample_bob'
+evmPrivateKey: '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d'
+networkConfiguration:
+  peerListeningPort: 9001
+oracleConfig:
+  host: 'http://localhost:8080/'

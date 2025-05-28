@@ -22,7 +22,7 @@ contract DeployP2PBTCLending is Script {
             COLLATERAL_DECIMALS
         );
         address collateralToken = address(mockCollateral);
-        address recipient = 0xDc94F4e8F84180C1E807fC4d6b43d65cb459b510;
+        address recipient = msg.sender;
         uint256 mintAmount = type(uint256).max;
         mockCollateral.mint(recipient, mintAmount);        
         MockPriceFeed mockBtcPriceFeed = new MockPriceFeed();

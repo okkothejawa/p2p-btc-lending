@@ -14,8 +14,8 @@ import {
 import * as bitcoin from "bitcoinjs-lib";
 import { useAccount, useWriteContract, useReadContract } from "wagmi";
 import * as ecc from "tiny-secp256k1";
-import ECPairFactory from "ecpair";
-const ECPair = ECPairFactory(ecc);
+import { addToLocalStorage, getFromLocalStorage, setInLocalStorage } from "@/utils/localStorage";
+import TransactionHistoryModal from "./modals/TransactionHistoryModal";
 // The type definitions are automatically included by TypeScript
 // No need to import the .d.ts file explicitly
 
@@ -30,12 +30,13 @@ const LenderFill = () => {
   const [selectedRequest, setSelectedRequest] = useState<any>(null);
   const [borrowRequests, setBorrowRequests] = useState<any[]>([]);
   const [txIdState, setTxIdState] = useState<string>("");
+  const [transactionHistoryModal, setTransactionHistoryModal] = useState<boolean>(false);
 
   // EVM wallet state from RainbowKit
   const { address: evmAddress, isConnected: isEvmConnected } = useAccount();
   const { writeContract, isPending } = useWriteContract();
   const { data: borrowRequest, error: readError } = useReadContract({
-    address: "0x6469ECb9f2Bc066A4207f0fD25bfa90f501D65fB",
+    address: "0x5cbe734bc3b33370034871b1070b0820a02a1505",
     abi: [
       {
         name: "borrowRequests",
@@ -54,6 +55,27 @@ const LenderFill = () => {
     ],
     functionName: "borrowRequests",
     args: [evmAddress || "0x0000000000000000000000000000000000000000"],
+    enabled: isEvmConnected,
+  });
+
+  const { data: latestBlockNumber, error: latestBlockNumberreadError } = useReadContract({
+    address: "0x3100000000000000000000000000000000000001",
+    abi: [
+      {
+        name: "blockNumber",
+        type: "function",
+        stateMutability: "view",
+        inputs: [],
+        "outputs": [
+        {
+          "name": "",
+          "type": "uint256",
+          "internalType": "uint256"
+        }],
+      },
+    ],
+    functionName: "blockNumber",
+    args: [],
     enabled: isEvmConnected,
   });
 
@@ -84,7 +106,7 @@ const LenderFill = () => {
     if (typeof window.unisat !== "undefined") {
       setIsUnisatAvailable(true);
       try {
-        const network = await window.unisat.getNetwork();
+        const network = await window.unisat.getChain();
         setCurrentNetwork(network);
 
         const accounts = await window.unisat.getAccounts();
@@ -92,7 +114,7 @@ const LenderFill = () => {
           setIsWalletConnected(true);
           setConnectedAddress(accounts[0]);
 
-          if (network === "testnet") {
+          if (network === "BITCOIN_SIGNET") {
             const balance = await window.unisat.getBalance();
             setBalance(balance.total);
           }
@@ -112,8 +134,8 @@ const LenderFill = () => {
 
   const switchTotestnet = async () => {
     try {
-      await window.unisat.switchNetwork("testnet");
-      setCurrentNetwork("testnet");
+      await window.unisat.switchChain("BITCOIN_SIGNET");
+      setCurrentNetwork("BITCOIN_SIGNET");
       setSuccess("Switched to testnet successfully!");
 
       const balance = await window.unisat.getBalance();
@@ -131,10 +153,10 @@ const LenderFill = () => {
       setIsWalletConnected(true);
       setConnectedAddress(accounts[0]);
 
-      const network = await window.unisat.getNetwork();
+      const network = await window.unisat.getChain();
       setCurrentNetwork(network);
 
-      if (network !== "testnet") {
+      if (network !== "BITCOIN_SIGNET") {
         await switchTotestnet();
       } else {
         const balance = await window.unisat.getBalance();
@@ -153,7 +175,7 @@ const LenderFill = () => {
   async function postTransaction(rawTxHex: string) {
     let tempTxId = "";
     try {
-      const response = await fetch("https://mempool.space/testnet4/api/tx", {
+      const response = await fetch("https://mempool.space/signet/api/tx", {
         method: "POST",
         headers: {
           "Content-Type": "text/plain",
@@ -181,22 +203,16 @@ const LenderFill = () => {
       setError("Please connect your UniSat wallet first");
       return;
     }
-    if (currentNetwork !== "testnet") {
+    if (currentNetwork !== "BITCOIN_SIGNET") {
       setError("Please switch to testnet network");
       return;
     }
 
     try {
       bitcoin.initEccLib(ecc);
-
-      const validator = (
-        pubkey: Buffer,
-        msghash: Buffer,
-        signature: Buffer
-      ): boolean => ECPair.fromPublicKey(pubkey).verify(msghash, signature);
       // Get UTXOs from UniSat wallet
       const response = await fetch(
-        `https://mempool.space/testnet4/api/address/${connectedAddress}/utxo`
+        `https://mempool.space/signet/api/address/${connectedAddress}/utxo`
       );
       const utxos = await response.json();
 
@@ -264,26 +280,67 @@ const LenderFill = () => {
         if (!txid) {
           throw new Error("Failed to broadcast transaction");
         }
+        
+        const prevTxs = getFromLocalStorage("transactionHistory", []);
+        setInLocalStorage("transactionHistory", [...prevTxs, {
+          txid,
+          status: "pending",
+          createdAt: Date.now(),
+          borrowerAddress: request.borrower,
+        }]);
 
-        // Submit the filled request to the smart contract
-        await writeContract({
-          address: "0x9a676e781a523b5d0c0e43731313a708cb607508",
-          abi: [
-            {
-              name: "lend",
-              type: "function",
-              stateMutability: "nonpayable",
-              inputs: [{ name: "borrower", type: "address" }],
-              outputs: [],
-            },
-          ],
-          functionName: "lend",
-          args: [request.borrower],
-        });
+        // const response = await fetch(
+        //   `https://mempool.space/signet/api/tx/${txid}`
+        // );
 
-        setSuccess(
-          `Borrow request filled successfully! Transaction ID: ${txid}`
-        );
+        // const data = await response.json();
+
+        // const version = data.version;
+        // const locktime = data.locktime;
+        // const vin = data.vin;
+        // const vout = data.vout;
+        // const blockHeight = data.status.block_height;
+
+        // console.log("Transaction details:", {
+        //   version,
+        //   vin,
+        //   vout,
+        //   locktime,
+        //   blockHeight,
+        //   txid,
+        // });
+
+        // const merkleResponse = await fetch(
+        //   `https://mempool.space/signet/api/tx/${txid}/merkle-proof`
+        // );
+        // const merkleData = await merkleResponse.json();
+        // const intermediateNodes = merkleData.merkle;
+        // const index = merkleData.pos;
+
+        // console.log("Merkle proof data:", {
+        //   intermediateNodes,
+        //   index,
+        // });
+
+        // // Submit the filled request to the smart contract
+        // await writeContract({
+        //   address: "0x0bad399b1820d18f9fa92aa45518d46d16818101",
+        //   abi: [
+        //     {
+        //       name: "lend",
+        //       type: "function",
+        //       stateMutability: "nonpayable",
+        //       inputs: [{"name":"borrower","type":"address","internalType":"address"},{"name":"lendTp","type":"tuple","internalType":"struct P2PBTCLending.TransactionParams","components":[{"name":"version","type":"bytes4","internalType":"bytes4"},{"name":"vin","type":"bytes","internalType":"bytes"},{"name":"vout","type":"bytes","internalType":"bytes"},{"name":"locktime","type":"bytes4","internalType":"bytes4"},{"name":"intermediateNodes","type":"bytes","internalType":"bytes"},{"name":"blockHeight","type":"uint256","internalType":"uint256"},{"name":"index","type":"uint256","internalType":"uint256"}]},{"name":"blockHeader","type":"bytes","internalType":"bytes"}],
+        //       outputs: [],
+        //     },
+        //   ],
+        //   functionName: "lend",
+        //   args: [request.borrower, (version, vin, vout, locktime, intermediateNodes, blockHeight, index)],
+        // });
+
+        // setSuccess(
+        //   `Borrow request filled successfully! Transaction ID: ${txid}`
+        // );
       } catch (error) {
         console.error("PSBT Error:", error);
         if (error instanceof Error) {
@@ -334,7 +391,7 @@ const LenderFill = () => {
                   </AlertDescription>
                 </Alert>
 
-                {currentNetwork !== "testnet" ? (
+                {currentNetwork !== "BITCOIN_SIGNET" ? (
                   <Button
                     onClick={switchTotestnet}
                     className="w-full"
@@ -367,6 +424,14 @@ const LenderFill = () => {
                 )}
               </>
             )}
+
+            <Button
+              onClick={() => setTransactionHistoryModal(true)}
+              className="w-full flex items-center justify-center gap-2"
+            >
+              <ArrowRight className="h-4 w-4" />
+              View Transaction History
+            </Button>
 
             {/* Borrow Requests List */}
             <div className="space-y-4">
@@ -441,6 +506,11 @@ const LenderFill = () => {
           </div>
         </CardContent>
       </Card>
+      <TransactionHistoryModal
+        isOpen={transactionHistoryModal}
+        onClose={() => setTransactionHistoryModal(false)}
+        latestBlockNumber={Number(latestBlockNumber)}
+      />
     </div>
   );
 };

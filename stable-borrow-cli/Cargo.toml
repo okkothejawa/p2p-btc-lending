@@ -1,0 +1,30 @@
+[package]
+authors = ["okkothejawa"]
+edition = "2024"
+name = "stable-borrow-cli"
+version = "0.1.0"
+
+[dependencies]
+alloy = "1.0.7"
+alloy-contract = "1.0.8"
+bitcoin = {version = "0.32.2"}
+bitcoin-rpc-provider = {path = "./crates/bitcoin-rpc-provider"}
+dlc = {path = "./crates/dlc", features = ["use-serde"]}
+dlc-manager = {path = "./crates/dlc-manager", features = ["use-serde", "parallel"]}
+dlc-messages = {path = "./crates/dlc-messages"}
+dlc-sled-storage-provider = {path = "./crates/dlc-sled-storage-provider"}
+futures = "0.3"
+lightning = {version = "0.0.125"}
+lightning-net-tokio = {version = "0.0.125" }
+p2pd-oracle-client = {path = "./crates/p2pd-oracle-client"}
+serde = "1.0"
+serde_json = "1.0"
+serde_yaml = "0.9.14"
+time = "0.3.16"
+tokio = {version = "1.5", features = ["io-util", "macros", "rt", "rt-multi-thread", "sync", "net", "time"]}
+
+[dev-dependencies]
+assert_cmd = "2.0.12"
+predicates = "3.0.3"
+bitcoin-test-utils = { git = "https://github.com/p2pderivatives/rust-dlc.git", version = "0.1.0" }
+rexpect = "0.5.0"

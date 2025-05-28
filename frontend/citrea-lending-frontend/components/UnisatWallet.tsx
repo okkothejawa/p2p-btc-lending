@@ -27,7 +27,8 @@ const UnisatWallet = () => {
     if (typeof window.unisat !== 'undefined') {
       setIsUnisatAvailable(true);
       try {
-        const network = await window.unisat.getNetwork();
+        const networkData = await window.unisat.getChain();
+        const network = networkData.enum;
         setCurrentNetwork(network);
 
         const accounts = await window.unisat.getAccounts();
@@ -35,7 +36,7 @@ const UnisatWallet = () => {
           setIsWalletConnected(true);
           setConnectedAddress(accounts[0]);
 
-          if (network === 'testnet') {
+          if (network === 'BITCOIN_SIGNET') {
             const balanceData = await window.unisat.getBalance();
             setBalance(balanceData.total);
           }
@@ -52,8 +53,8 @@ const UnisatWallet = () => {
 
   const switchTotestnet = async () => {
     try {
-      await window.unisat.switchNetwork('testnet');
-      setCurrentNetwork('testnet');
+      await window.unisat.swithChain('BITCOIN_SIGNET');
+      setCurrentNetwork('BITCOIN_SIGNET');
       setSuccess('Switched to testnet successfully!');
 
       const balanceData = await window.unisat.getBalance();
@@ -69,10 +70,10 @@ const UnisatWallet = () => {
       setIsWalletConnected(true);
       setConnectedAddress(accounts[0]);
 
-      const network = await window.unisat.getNetwork();
-      setCurrentNetwork(network);
+      const network = await window.unisat.getChain();
+      setCurrentNetwork(network.enum);
 
-      if (network !== 'testnet') {
+      if (network !== 'BITCOIN_SIGNET') {
         await switchTotestnet();
       } else {
         const balanceData = await window.unisat.getBalance();
@@ -109,14 +110,14 @@ const UnisatWallet = () => {
       ) : (
         <div className="gap-1 p-2 rounded-xl bg-zinc-950 font-semibold text-white drop-shadow-md hover:scale-[1.02] transition-transform">
           <div className="flex gap-4 items-center pl-1">
-            <p> {satsToBtc(balance)} tBTC</p>
+            <p> {satsToBtc(balance)} sBTC</p>
             <p className="bg-zinc-800 py-1.5 px-3 rounded-lg">
               {connectedAddress.slice(0, 5)}...
               {connectedAddress.slice(-5)}
             </p>
           </div>
 
-          {currentNetwork !== 'testnet' && (
+          {currentNetwork !== 'BITCOIN_SIGNET' && (
             <Button
               onClick={switchTotestnet}
               className="w-full"

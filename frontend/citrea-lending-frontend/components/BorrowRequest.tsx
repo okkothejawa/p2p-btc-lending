@@ -9,8 +9,7 @@ import { Wallet, ArrowRight, AlertCircle, DollarSign, Lock } from 'lucide-react'
 import * as bitcoin from "bitcoinjs-lib";
 import { useAccount, useWriteContract } from 'wagmi';
 import * as ecc from 'tiny-secp256k1';
-import ECPairFactory from 'ecpair';
-const ECPair = ECPairFactory(ecc);
+import { withHexPrefix } from "@/utils/index";
 
 const BorrowRequest = () => {
   const [error, setError] = useState('');
@@ -48,7 +47,8 @@ const BorrowRequest = () => {
     if (typeof window.unisat !== 'undefined') {
       setIsUnisatAvailable(true);
       try {
-        const network = await window.unisat.getNetwork();
+        const networkData = await window.unisat.getChain();
+        const network = networkData.enum;
         setCurrentNetwork(network);
         
         const accounts = await window.unisat.getAccounts();
@@ -56,7 +56,7 @@ const BorrowRequest = () => {
           setIsWalletConnected(true);
           setConnectedAddress(accounts[0]);
           
-          if (network === 'testnet') {
+          if (network === 'BITCOIN_SIGNET') {
             const balance = await window.unisat.getBalance();
             setBalance(balance.total);
           }
@@ -71,9 +71,9 @@ const BorrowRequest = () => {
 
   const switchTotestnet = async () => {
     try {
-      await window.unisat.switchNetwork('testnet');
-      setCurrentNetwork('testnet');
-      setSuccess('Switched to testnet successfully!');
+      await window.unisat.switchChain('BITCOIN_SIGNET');
+      setCurrentNetwork('BITCOIN_SIGNET');
+      setSuccess('Switched to signet successfully!');
       
       const balance = await window.unisat.getBalance();
       setBalance(balance.total);
@@ -88,10 +88,11 @@ const BorrowRequest = () => {
       setIsWalletConnected(true);
       setConnectedAddress(accounts[0]);
       
-      const network = await window.unisat.getNetwork();
+      const networkData = await window.unisat.getChain();
+      const network = networkData.enum;
       setCurrentNetwork(network);
       
-      if (network !== 'testnet') {
+      if (network !== 'BITCOIN_SIGNET') {
         await switchTotestnet();
       } else {
         const balance = await window.unisat.getBalance();
@@ -110,8 +111,8 @@ const BorrowRequest = () => {
       setError('Please connect your UniSat wallet first');
       return false;
     }
-    if (currentNetwork !== 'testnet') {
-      setError('Please switch to testnet network');
+    if (currentNetwork !== 'BITCOIN_SIGNET') {
+      setError('Please switch to signet network');
       return false;
     }
     if (!borrowAmount || isNaN(Number(borrowAmount)) || Number(borrowAmount) <= 0) {
@@ -131,7 +132,7 @@ const BorrowRequest = () => {
     try {
       bitcoin.initEccLib(ecc);
       // Get UTXOs from UniSat wallet
-      const response = await fetch(`https://mempool.space/testnet4/api/address/${connectedAddress}/utxo`);
+      const response = await fetch(`https://mempool.space/signet/api/address/${connectedAddress}/utxo`);
       const utxos: addressUTXO[] = await response.json();
       
       // Find a UTXO close to 330 sats
@@ -174,7 +175,7 @@ const BorrowRequest = () => {
         await new Promise(resolve => setTimeout(resolve, 3000));
         
         // Refresh UTXOs
-        const newResponse = await fetch(`https://mempool.space/testnet4/api/address/${connectedAddress}/utxo`);
+        const newResponse = await fetch(`https://mempool.space/signet/api/address/${connectedAddress}/utxo`);
         const newUtxos: addressUTXO[] = await newResponse.json();
         
         // Find our newly created dust UTXO
@@ -227,13 +228,14 @@ const BorrowRequest = () => {
       if (isEvmConnected) {
         try {
           // Convert BTC address to bytes by encoding it as UTF-8
-          const btcAddressBytes = `0x${Buffer.from(connectedAddress).toString('hex')}`;
+          const btcAddressBytes = bitcoin.address.fromBech32(connectedAddress).data.toString('hex');
           // Convert hex (not base64) signed PSBT to bytes
           const psbtBytes = `0x${signedResult}`;
           console.log(psbtBytes);
+          console.log(btcAddressBytes);
 
           await writeContract({
-            address: '0x9a676e781a523b5d0c0e43731313a708cb607508',
+            address: '0x5cbe734bc3b33370034871b1070b0820a02a1505',
             abi: [{
               name: 'requestBorrow',
               type: 'function',
@@ -250,8 +252,8 @@ const BorrowRequest = () => {
             args: [
               BigInt(borrowAmount),
               BigInt(Math.floor(parseFloat(interestRate) * 100)), // Convert to basis points
-              btcAddressBytes,
-              psbtBytes
+              withHexPrefix(btcAddressBytes),
+              withHexPrefix(psbtBytes)
             ]
           });
           setSuccess('Borrow request submitted to smart contract!');
@@ -276,7 +278,7 @@ const BorrowRequest = () => {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <DollarSign className="h-6 w-6" />
-            Create BTC Borrow Intent (testnet)
+            Create BTC Borrow Intent (signet)
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -304,18 +306,18 @@ const BorrowRequest = () => {
                   </AlertDescription>
                 </Alert>
                 
-                {currentNetwork !== 'testnet' ? (
+                {currentNetwork !== 'BITCOIN_SIGNET' ? (
                   <Button 
                     onClick={switchTotestnet}
                     className="w-full"
                     variant="outline"
                   >
-                    Switch to testnet
+                    Switch to signet
                   </Button>
                 ) : (
                   <Alert>
                     <AlertDescription>
-                      Network: testnet | Balance: {balance} sats
+                      Network: signet | Balance: {balance} sats
                     </AlertDescription>
                   </Alert>
                 )}
@@ -368,7 +370,7 @@ const BorrowRequest = () => {
             <Button 
               onClick={createAndSignIntent}
               className="w-full flex items-center justify-center gap-2"
-              disabled={!isWalletConnected || currentNetwork !== 'testnet' || isPending}
+              disabled={!isWalletConnected || currentNetwork !== 'BITCOIN_SIGNET' || isPending}
             >
               <Lock className="h-4 w-4" />
               {isPending ? 'Submitting to Contract...' : 'Create Borrow Intent'}
