@@ -63,7 +63,8 @@ impl PayoutFunction {
                         == 0
                 }
                 PayoutFunctionPiece::HyperbolaPayoutCurvePiece(h) => {
-                    h.left_end_point.event_outcome == 0
+                    // h.left_end_point.event_outcome == 0
+                    true
                 }
             };
 

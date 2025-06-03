@@ -17,7 +17,7 @@ use crate::contract::{
     signed_contract::SignedContract, AdaptorInfo, ClosedContract, Contract, FailedAcceptContract,
     FailedSignContract, PreClosedContract,
 };
-use crate::contract_updater::{accept_contract, accept_loan_contract, send_escrow_transaction, verify_accepted_and_sign_contract};
+use crate::contract_updater::{accept_contract, accept_loan_contract, send_escrow_transaction, verify_accepted_and_sign_contract, verify_accepted_and_sign_loan_contract};
 use crate::error::Error;
 use crate::utils::get_object_in_state;
 use crate::{ChannelId, ContractId, ContractSignerProvider};
@@ -216,7 +216,7 @@ where
     }
 
     /// Function called to pass a DlcMessage to the Manager.
-    pub fn on_dlc_message(
+    pub async fn on_dlc_message(
         &self,
         msg: &DlcMessage,
         counter_party: PublicKey,
@@ -232,12 +232,9 @@ where
                 Ok(None)
             }
             DlcMessage::Accept(a) => Ok(Some(self.on_accept_message(a, &counter_party)?)),
-            DlcMessage::AcceptLoan(a) => {
-                self.on_accept_loan_message(a, &counter_party)?;
-                Ok(None)
-            }
+            DlcMessage::AcceptLoan(a) => Ok(Some(self.on_accept_loan_message(a, &counter_party).await?)),
             DlcMessage::InitiateAcceptLoan(a) => {
-                self.on_initiate_accept_loan_message(a, &counter_party, evm_pk)?;
+                self.on_initiate_accept_loan_message(a, &counter_party, evm_pk).await?;
                 Ok(None)
             },
             DlcMessage::Sign(s) => {
@@ -481,7 +478,7 @@ where
     pub fn accept_loan_contract_offer(
         &self,
         contract_id: &ContractId,
-    ) -> Result<(PublicKey, AcceptLoanDlc), Error> {
+    ) -> Result<(ContractId, PublicKey, AcceptLoanDlc), Error> {
         let offered_loan_contract =
             get_contract_in_state!(self, contract_id, OfferedLoanEscrowConfirmed, None as Option<PublicKey>)?;
 
@@ -490,17 +487,7 @@ where
         let borrower_preimage_bytes = borrower_preimage.to_be_bytes();
         let borrower_hash = bitcoin::hashes::sha256::Hash::hash(&borrower_preimage_bytes).to_byte_array();
 
-        // let (accepted_loan_contract, accept_msg) = accept_loan_contract(
-        //     &self.secp,
-        //     &offered_loan_contract,
-        //     escrow_txid,
-        //     borrower_hash,
-        //     &self.wallet,
-        //     &self.signer_provider,
-        //     &self.blockchain,
-        // )?;
-
-        let accept_msg = accept_loan_contract(
+        let (accepted_loan_contract, accept_msg) = accept_loan_contract(
             &self.secp,
             &offered_loan_contract,
             escrow_txid,
@@ -511,16 +498,16 @@ where
             &self.blockchain,
         )?;
 
-        // self.wallet.import_address(&Address::p2wsh(
-        //     &accepted_loan_contract.dlc_transactions.funding_script_pubkey,
-        //     self.blockchain.get_network()?,
-        // ))?;
+        self.wallet.import_address(&Address::p2wsh(
+            &accepted_loan_contract.dlc_transactions.funding_script_pubkey,
+            self.blockchain.get_network()?,
+        ))?;
 
-        // let contract_id = accepted_loan_contract.get_contract_id();
+        let contract_id = accepted_loan_contract.get_contract_id();
 
-        // self.store
-        //     .update_contract(&Contract::Accepted(accepted_loan_contract))?;
-        Ok((offered_loan_contract.offered_contract.counter_party, accept_msg))
+        self.store
+            .update_contract(&Contract::Accepted(accepted_loan_contract.to_accepted_contract()))?;
+        Ok((contract_id, offered_loan_contract.offered_contract.counter_party, accept_msg))
     }
 
     /// Function to update the state of the [`ChainMonitor`] with new
@@ -556,6 +543,7 @@ where
     /// update them if possible.
     pub fn periodic_check(&self, check_channels: bool, evm_pk: &str) -> Result<(), Error> {
         self.check_offered_loan_contracts_for_escrow(evm_pk)?;
+        println!("periodic check");
         self.check_signed_contracts()?;
         self.check_confirmed_contracts()?;
         self.check_preclosed_contracts()?;
@@ -654,12 +642,13 @@ where
         Ok(DlcMessage::Sign(signed_msg))
     }
 
-    fn on_accept_loan_message(
+    async fn on_accept_loan_message(
         &self,
         accept_msg: &AcceptLoanDlc,
         counter_party: &PublicKey,
-    ) -> Result<(), Error> {
+    ) -> Result<DlcMessage, Error> {
         println!("on_accept_loan_message");
+        dotenv().ok();
         let mut collateral_tx = accept_msg.signed_escrow_spend_tx.clone();
 
         let offered_loan_contract = get_contract_in_state!(
@@ -670,6 +659,25 @@ where
         )?;
         let signer = self.signer_provider.derive_contract_signer(offered_loan_contract.offered_contract.keys_id)?;
         println!("signer: {}", signer.get_public_key(&self.secp).unwrap());
+
+        // Read the preimage from contract
+        let citrea_rpc_url = env::var("CITREA_RPC")
+                .map_err(|_| Error::InvalidParameters("CITREA_RPC environment variable not set".to_string()))?;
+        let provider = ProviderBuilder::new()
+                .connect(&citrea_rpc_url).await.unwrap();
+        let lending_contract_address_str = env::var("LENDING_CONTRACT_ADDRESS")
+            .map_err(|_| Error::InvalidParameters("LENDING_CONTRACT_ADDRESS environment variable not set".to_string()))?;
+        let lending_contract_address = primitives::Address::parse_checksummed(&lending_contract_address_str, None).unwrap();
+        let lending_contract = P2PBTCLending::new(
+            lending_contract_address,
+            provider
+        );
+        let borrower_hash = primitives::FixedBytes::from(accept_msg.borrower_hash.clone());
+        // Get the return value of `stableLoans(borrowerHash)` which is a three tuple, get the last value
+        let stable_loans = lending_contract.stableLoans(borrower_hash);
+        let stable_loans_result = stable_loans.call().await.unwrap();
+        let borrower_preimage = stable_loans_result.borrowerPreimage;
+
         // Sign the collateral transaction
         let lender_signature = get_sig_for_tx_input(
             &self.secp,
@@ -682,6 +690,7 @@ where
         ).unwrap();
         let mut witness_items: Vec<Vec<u8>> = collateral_tx.input[0].witness.clone().to_vec();
         witness_items[0] = lender_signature;
+        witness_items[1] = borrower_preimage.to_be_bytes().to_vec();
         collateral_tx.input[0].witness = bitcoin::Witness::from_slice(&witness_items);
         let mut writer = Vec::new();
         let _ = collateral_tx.consensus_encode(&mut writer);
@@ -694,10 +703,40 @@ where
             "Collateral transaction sent with txid: {}",
             collateral_txid
         );
-        Ok(())
+
+        let offered_contract = offered_loan_contract.offered_contract.clone();
+        let accept_dlc_msg = accept_msg.clone().to_accept_dlc();
+        println!("a1");
+        let (signed_contract, signed_msg) = match verify_accepted_and_sign_loan_contract(
+            &self.secp,
+            &offered_contract,
+            &accept_dlc_msg,
+            collateral_tx,
+            accept_msg.collateral_spk.clone(),
+            &self.wallet,
+            &self.signer_provider,
+        ) {
+            Ok(contract) => contract,
+            Err(e) => return self.accept_fail_on_error(offered_contract, accept_dlc_msg.clone(), e),
+        };
+        println!("a2");
+
+        self.wallet.import_address(&Address::p2wsh(
+            &signed_contract
+                .accepted_contract
+                .dlc_transactions
+                .funding_script_pubkey,
+            self.blockchain.get_network()?,
+        ))?;
+        println!("a3");
+
+        self.store
+            .update_contract(&Contract::Signed(signed_contract))?;
+
+        Ok(DlcMessage::Sign(signed_msg))
     }
 
-    fn on_initiate_accept_loan_message(
+    async fn on_initiate_accept_loan_message(
         &self,
         initiate_accept_msg: &InitiateAcceptLoanDlc,
         counter_party: &PublicKey,
@@ -705,52 +744,45 @@ where
     ) -> Result<(), Error> {
         println!("on_initiate_accept_loan_message");
         dotenv().ok();
+        
         let lender_evm_signer: PrivateKeySigner = evm_pk.parse()
             .map_err(|_| Error::InvalidParameters("Invalid EVM private key".to_string()))?;
-
+        
         let offered_loan_contract = get_contract_in_state!(
             self,
             &initiate_accept_msg.contract_id,
             OfferedLoan,
             Some(*counter_party)
         )?;
+        
         let collateral_amount = offered_loan_contract.offered_contract.total_collateral;
         let citrea_rpc_url: String = env::var("CITREA_RPC")
             .map_err(|_| Error::InvalidParameters("CITREA_RPC environment variable not set".to_string()))?;
         
-        // Create a new runtime for this operation
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
+        let provider = ProviderBuilder::new()
+            .wallet(lender_evm_signer)
+            .connect(&citrea_rpc_url)
+            .await
             .unwrap();
-
-        let provider = rt.block_on(async {
-            ProviderBuilder::new()
-                .wallet(lender_evm_signer)
-                .connect(&citrea_rpc_url).await.unwrap()
-        });
-
+        
         let lending_contract_address_str = env::var("LENDING_CONTRACT_ADDRESS")
             .map_err(|_| Error::InvalidParameters("LENDING_CONTRACT_ADDRESS environment variable not set".to_string()))?;
+        
         let lending_contract_address = primitives::Address::parse_checksummed(&lending_contract_address_str, None).unwrap();
-        let lending_contract = P2PBTCLending::new(
-            lending_contract_address,
-            provider
-        );
+        
+        let lending_contract = P2PBTCLending::new(lending_contract_address, provider);
+        
         let borrower_hash = primitives::FixedBytes::from(initiate_accept_msg.borrower_hash);
         let collateral_sat = primitives::U256::from(collateral_amount.to_sat());
+        
         let lend_stable = lending_contract.lendStable(borrower_hash, collateral_sat);
+        let lend_stable_tx = lend_stable.send()
+            .await
+            .map_err(|_| Error::BlockchainError("Failed to send lendStable transaction".to_string()))?;
         
-        let lend_stable_tx = rt.block_on(async {
-            lend_stable.send()
-                .await
-                .map_err(|_| Error::BlockchainError("Failed to send lendStable transaction".to_string()))
-        })?;
-        
-        rt.block_on(async {
-            lend_stable_tx.get_receipt().await
-                .map_err(|e| Error::BlockchainError(format!("Failed to get transaction receipt: {}", e)))
-        })?;
+        lend_stable_tx.get_receipt()
+            .await
+            .map_err(|e| Error::BlockchainError(format!("Failed to get transaction receipt: {}", e)))?;
         
         Ok(())
     }
@@ -772,7 +804,7 @@ where
         self.store
             .update_contract(&Contract::Signed(signed_contract))?;
 
-        self.blockchain.send_transaction(&fund_tx)?;
+        // self.blockchain.send_transaction(&fund_tx)?;
 
         Ok(())
     }
@@ -921,6 +953,7 @@ where
             if c.channel_id.is_some() {
                 continue;
             }
+            println!("check_confirmed_contracts");
             if let Err(e) = self.check_confirmed_contract(&c) {
                 error!(
                     "Error checking confirmed contract {}: {}",
@@ -940,14 +973,18 @@ where
         let contract_infos = &contract.accepted_contract.offered_contract.contract_info;
         let adaptor_infos = &contract.accepted_contract.adaptor_infos;
         for (contract_info, adaptor_info) in contract_infos.iter().zip(adaptor_infos.iter()) {
-            let matured: Vec<_> = contract_info
-                .oracle_announcements
-                .iter()
-                .filter(|x| {
-                    (x.oracle_event.event_maturity_epoch as u64) <= self.time.unix_time_now()
-                })
-                .enumerate()
-                .collect();
+        let matured: Vec<_> = contract_info
+            .oracle_announcements
+            .iter()
+            .filter(|x| {
+                let maturity_epoch = x.oracle_event.event_maturity_epoch as u64;
+                let current_time = self.time.unix_time_now();
+                println!("Maturity epoch: {}, Current time: {}, Matured: {}", 
+                        maturity_epoch, current_time, maturity_epoch <= current_time);
+                maturity_epoch <= current_time
+            })
+            .enumerate()
+            .collect();
             if matured.len() >= contract_info.threshold {
                 let attestations: Vec<_> = matured
                     .iter()
@@ -990,6 +1027,7 @@ where
                 &attestations,
                 &signer,
             )?;
+            println!("check_confirmed_contract");
             match self.close_contract(
                 contract,
                 cet,
@@ -1000,7 +1038,7 @@ where
                     return Ok(());
                 }
                 Err(e) => {
-                    warn!(
+                    println!(
                         "Failed to close contract {}: {}",
                         contract.accepted_contract.get_contract_id_string(),
                         e
@@ -1138,10 +1176,12 @@ where
         signed_cet: Transaction,
         attestations: Vec<OracleAttestation>,
     ) -> Result<Contract, Error> {
+        let mut writer = Vec::new();
+        let _ = signed_cet.consensus_encode(&mut writer);
+        println!("signed cet {}", writer.to_hex_string(hex::Case::Lower));
         let confirmations = self
             .blockchain
             .get_transaction_confirmations(&signed_cet.compute_txid())?;
-
         if confirmations < 1 {
             // TODO(tibo): if this fails because another tx is already in
             // mempool or blockchain, we might have been cheated. There is

@@ -1,0 +1,61 @@
+{
+  "collateral": 10000000,
+  "collateralRatio": 150,
+  "liquidationRatio": 125,
+  "interestRate": 1,
+  "duration": 604800,
+  "feeRate": 2,
+  "contractInfos": [
+    {
+      "contractDescriptor": {
+        "numerical": {
+          "payoutFunction": {
+            "payoutFunctionPieces": [
+              {
+                "hyperbolaPayoutCurvePiece": {
+                  "leftEndPoint": {
+                    "eventOutcome": 1,
+                    "outcomePayout": 0,
+                    "extraPrecision": 0
+                  },
+                  "rightEndPoint": {
+                    "eventOutcome": 1048575,
+                    "outcomePayout": 0,
+                    "extraPrecision": 0
+                  },
+                  "usePositivePiece": true,
+                  "translateOutcome": 0.0,
+                  "translatePayout": 0.0,
+                  "a": 1.0,
+                  "b": 0.0,
+                  "c": 0.0,
+                  "d": 90000 
+                }
+              }
+            ]
+          },
+          "roundingIntervals": {
+            "intervals": [
+              {
+                "beginInterval": 0,
+                "roundingMod": 1
+              }
+            ]
+          },
+          "differenceParams": null,
+          "oracleNumericInfos": {
+            "base": 2,
+            "nbDigits": [20]
+          }
+        }
+      },
+      "oracles": {
+        "publicKeys": [
+          "0d829c1cc556aa59060df5a9543c5357199ace5db9bcd5a8ddd6ee2fc7b6d174"
+        ],
+        "eventId": "btcusd1748997947",
+        "threshold": 1
+      }
+    }
+  ]
+}

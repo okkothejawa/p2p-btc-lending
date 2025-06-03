@@ -30,10 +30,6 @@ pub(crate) fn get_sig_hash_msg(
         value,
         EcdsaSighashType::All,
     )?;
-    println!("sig_hash: {}", sig_hash);
-    println!("script pubkey: {}", script_pubkey);
-    println!("input index: {}", input_index);
-    println!("value: {}", value);
     Ok(Message::from_digest_slice(sig_hash.as_ref()).unwrap())
 }
 
@@ -180,22 +176,18 @@ pub fn sign_multi_sig_input<C: Signing>(
         sk,
     )?;
 
-    let own_pk = &PublicKey::from_secret_key(secp, sk);
+    println!(
+        "Signing cet input {} with own sig: {:?} and other sig: {:?}",
+        input_index, own_sig, other_sig
+    );
 
     let other_finalized_sig = finalize_sig(other_sig, EcdsaSighashType::All);
 
-    transaction.input[input_index].witness = if own_pk < other_pk {
+    transaction.input[input_index].witness = {
         Witness::from_slice(&[
             Vec::new(),
             own_sig,
             other_finalized_sig,
-            script_pubkey.to_bytes(),
-        ])
-    } else {
-        Witness::from_slice(&[
-            Vec::new(),
-            other_finalized_sig,
-            own_sig,
             script_pubkey.to_bytes(),
         ])
     };

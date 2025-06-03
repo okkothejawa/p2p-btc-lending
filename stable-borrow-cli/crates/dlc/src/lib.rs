@@ -59,7 +59,7 @@ const TX_VERSION: Version = Version::TWO;
 
 /// The base weight of a fund transaction
 /// See: https://github.com/discreetlogcontracts/dlcspecs/blob/master/Transactions.md#fees
-const FUND_TX_BASE_WEIGHT: usize = 214;
+const FUND_TX_BASE_WEIGHT: usize = 400;
 
 /// The weight of a CET excluding payout outputs
 /// See: https://github.com/discreetlogcontracts/dlcspecs/blob/master/Transactions.md#fees
@@ -358,7 +358,7 @@ impl PartyParams {
         }
 
         let change_output = TxOut {
-            value: self.input_amount - required_input_funds,
+            value: self.input_amount - required_input_funds - Amount::from_sat(100),
             script_pubkey: self.change_script_pubkey.clone(),
         };
 
@@ -428,32 +428,20 @@ pub fn create_dlc_transactions(
 }
 
 /// Create the transactions for a loan DLC contract based on the provided parameters
-pub fn create_loan_dlc_transactions(
+pub fn create_loan_expiration_dlc_transactions(
     offer_params: &PartyParams,
     accept_params: &PartyParams,
     payouts: &[Payout],
     refund_lock_time: u32,
-    fee_rate_per_vb: u64,
-    fund_lock_time: u32,
     cet_lock_time: u32,
-    fund_output_serial_id: u64,
-    borrower_preimage: u128
+    collateral_tx: Transaction,
+    collateral_script_pubkey: ScriptBuf,
 ) -> Result<DlcTransactions, Error> {
-    let (fund_tx, funding_script_pubkey) = create_fund_loan_transaction_with_fees(
-        offer_params,
-        accept_params,
-        fee_rate_per_vb,
-        fund_lock_time,
-        fund_output_serial_id,
-        Amount::ZERO,
-        borrower_preimage
-    )?;
     let fund_outpoint = OutPoint {
-        txid: fund_tx.compute_txid(),
-        vout: util::get_output_for_script_pubkey(&fund_tx, &funding_script_pubkey.to_p2wsh())
-            .expect("to find the funding script pubkey")
-            .0 as u32,
+        txid: collateral_tx.compute_txid(),
+        vout: 0
     };
+    println!("[create_loan_expiration_dlc_transactions] fund_outpoint: {:?}", fund_outpoint);
     let (cets, refund_tx) = create_cets_and_refund_tx(
         offer_params,
         accept_params,
@@ -464,11 +452,21 @@ pub fn create_loan_dlc_transactions(
         None,
     )?;
 
+    let mut unsigned_collateral_tx = Transaction {
+        version: TX_VERSION,
+        lock_time: LockTime::from_consensus(0),
+        input: collateral_tx.input.clone(),
+        output: collateral_tx.output.clone(),
+    };
+
+    unsigned_collateral_tx.input[0].witness = Witness::default();
+    
+
     Ok(DlcTransactions {
-        fund: fund_tx,
+        fund: unsigned_collateral_tx,
         cets,
         refund: refund_tx,
-        funding_script_pubkey,
+        funding_script_pubkey: collateral_script_pubkey,
     })
 }
 
@@ -556,7 +554,8 @@ pub fn create_escrow_transaction(
         - accept_change_output.value
         - accept_fund_fee
         - accept_cet_fee
-        - extra_fee;
+        - extra_fee
+        + Amount::from_sat(100); // TODO: Fix this later, this is a hack
 
     println!("offer_params.input_amount: {}", offer_params.input_amount);
     println!("accept_params.input_amount: {}", accept_params.input_amount);
@@ -599,6 +598,8 @@ pub fn create_escrow_transaction(
         0,
     );
 
+    println!("escrow_tx: {:?}", fund_tx);
+
     Ok((fund_tx, funding_script_pubkey))    
 }
 
@@ -614,7 +615,7 @@ pub fn create_collateral_transaction(
         make_collateral_redeemscript(borrower_pubkey, lender_pubkey, &lender_hash);
 
     let collateral_tx_out = TxOut {
-        value: collateral_amount,
+        value: collateral_amount - Amount::from_sat(166), // TODO: Fix hardcoded fees
         script_pubkey: collateral_script_pubkey.to_p2wsh(),
     };
 
@@ -626,77 +627,6 @@ pub fn create_collateral_transaction(
     };
     
     Ok((collateral_tx, collateral_script_pubkey))
-}
-
-pub(crate) fn create_fund_loan_transaction_with_fees(
-    offer_params: &PartyParams,
-    accept_params: &PartyParams,
-    fee_rate_per_vb: u64,
-    fund_lock_time: u32,
-    fund_output_serial_id: u64,
-    extra_fee: Amount,
-    borrower_preimage: u128
-) -> Result<(Transaction, ScriptBuf), Error> {
-    let total_collateral = checked_add!(offer_params.collateral, accept_params.collateral)?;
-
-    let (offer_change_output, offer_fund_fee, offer_cet_fee) =
-        offer_params.get_change_output_and_fees(fee_rate_per_vb, extra_fee)?;
-    let (accept_change_output, accept_fund_fee, accept_cet_fee) =
-        accept_params.get_change_output_and_fees(fee_rate_per_vb, extra_fee)?;
-
-    let fund_output_value = checked_add!(offer_params.input_amount, accept_params.input_amount)?
-        - offer_change_output.value
-        - accept_change_output.value
-        - offer_fund_fee
-        - accept_fund_fee
-        - extra_fee;
-
-    assert_eq!(
-        total_collateral + offer_cet_fee + accept_cet_fee + extra_fee,
-        fund_output_value
-    );
-
-    assert_eq!(
-        offer_params.input_amount + accept_params.input_amount,
-        fund_output_value
-            + offer_change_output.value
-            + accept_change_output.value
-            + offer_fund_fee
-            + accept_fund_fee
-            + extra_fee
-    );
-
-    let fund_sequence = util::get_sequence(fund_lock_time);
-    let (offer_tx_ins, offer_inputs_serial_ids) =
-        offer_params.get_unsigned_tx_inputs_and_serial_ids(fund_sequence);
-    let (accept_tx_ins, accept_inputs_serial_ids) =
-        accept_params.get_unsigned_tx_inputs_and_serial_ids(fund_sequence);
-
-
-    let borrower_preimage_bytes = borrower_preimage.to_be_bytes();
-    let borrower_hash = bitcoin::hashes::sha256::Hash::hash(&borrower_preimage_bytes).to_byte_array();
-    // Write the hex string 0x64004000
-    // TODO: Check if this is the correct value for the locktime
-    let locktime = Sequence::from_hex("64004000").unwrap(); // 51200 seconds
-    let funding_script_pubkey = 
-        make_loan_funding_redeemscript(&accept_params.fund_pubkey, &offer_params.fund_pubkey, locktime, &borrower_hash);
-
-    let fund_tx = create_funding_transaction(
-        &funding_script_pubkey,
-        fund_output_value,
-        &offer_tx_ins,
-        &offer_inputs_serial_ids,
-        &accept_tx_ins,
-        &accept_inputs_serial_ids,
-        offer_change_output,
-        offer_params.change_serial_id,
-        accept_change_output,
-        accept_params.change_serial_id,
-        fund_output_serial_id,
-        fund_lock_time,
-    );
-
-    Ok((fund_tx, funding_script_pubkey))
 }
 
 pub(crate) fn create_cets_and_refund_tx(
@@ -776,13 +706,13 @@ pub fn create_cet(
     fund_tx_in: &TxIn,
     lock_time: u32,
 ) -> Transaction {
-    let mut output: Vec<TxOut> = if offer_payout_serial_id < accept_payout_serial_id {
+    let output: Vec<TxOut> = if offer_payout_serial_id < accept_payout_serial_id {
         vec![offer_output, accept_output]
     } else {
         vec![accept_output, offer_output]
     };
 
-    output = util::discard_dust(output, DUST_LIMIT);
+    // output = util::discard_dust(output, DUST_LIMIT);
 
     Transaction {
         version: TX_VERSION,
@@ -1016,6 +946,27 @@ pub fn make_collateral_redeemscript(borrower_pubkey: &PublicKey, lender_pubkey: 
         .push_opcode(opcodes::all::OP_ENDIF)
         .into_script()
 }
+
+/// Create the script for the collateral tx after codesep
+pub fn make_collateral_after_codesep_script(lender_hashlock_hash: &[u8; 32]) -> ScriptBuf {
+    Builder::new()
+        .push_opcode(opcodes::all::OP_CHECKSIGVERIFY)
+        .push_opcode(opcodes::all::OP_1SUB)
+        .push_opcode(opcodes::all::OP_NOTIF)
+        .push_opcode(opcodes::all::OP_CHECKSIG)
+        .push_opcode(opcodes::all::OP_ELSE)
+        .push_opcode(opcodes::all::OP_DROP)
+        .push_opcode(opcodes::all::OP_SIZE)
+        .push_int(16)
+        .push_opcode(opcodes::all::OP_EQUALVERIFY)
+        .push_opcode(opcodes::all::OP_SHA256)
+        .push_slice(lender_hashlock_hash)
+        .push_opcode(opcodes::all::OP_EQUAL)
+        .push_opcode(opcodes::all::OP_ENDIF)
+        .push_opcode(opcodes::all::OP_ENDIF)
+        .into_script()
+    }
+
 
 
 fn get_oracle_sig_point<C: secp256k1_zkp::Verification>(

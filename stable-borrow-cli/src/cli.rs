@@ -102,7 +102,7 @@ pub(crate) async fn poll_for_user_input(
     print!("> ");
     io::stdout().flush().unwrap(); // Without flushing, the `>` doesn't print
     for line in stdin.lock().lines() {
-        process_incoming_messages(&peer_manager, &dlc_manager, &dlc_message_handler, evm_pk);
+        process_incoming_messages(&peer_manager, &dlc_manager, &dlc_message_handler, evm_pk).await;
         let line = line.unwrap();
         let mut words = line.split_whitespace();
         if let Some(word) = words.next() {
@@ -306,7 +306,7 @@ pub(crate) async fn poll_for_user_input(
                 }
                 a @ "finishacceptloanoffer" => {
                     let contract_id = read_id_or_continue!(words, a, "contract id");
-                    let (node_id, msg) = dlc_manager
+                    let (_, node_id, msg) = dlc_manager
                         .lock()
                         .unwrap()
                         .accept_loan_contract_offer(&contract_id)
@@ -692,7 +692,7 @@ pub(crate) fn parse_peer_info(
     Ok((pubkey.unwrap(), peer_addr.unwrap().unwrap()))
 }
 
-fn process_incoming_messages(
+async fn process_incoming_messages(
     peer_manager: &Arc<PeerManager>,
     dlc_manager: &Arc<Mutex<DlcManager>>,
     dlc_message_handler: &Arc<DlcMessageHandler>,
@@ -708,7 +708,7 @@ fn process_incoming_messages(
             .lock()
             .unwrap()
             .on_dlc_message(&message, node_id, evm_pk)
-            .expect("Error processing message");
+            .await.expect("Error processing message");
         if let Some(msg) = resp {
             println!("Sending message to {}", node_id);
             dlc_message_handler.send_message(node_id, msg);

@@ -5,7 +5,7 @@ use super::offered_contract::{OfferedContract, OfferedLoanContract};
 use super::AdaptorInfo;
 use bitcoin::{Amount, SignedAmount, Transaction, Txid};
 use dlc::{DlcTransactions, PartyParams};
-use dlc_messages::{AcceptDlc, FundingInput};
+use dlc_messages::{AcceptDlc, AcceptLoanDlc, FundingInput};
 use secp256k1_zkp::ecdsa::Signature;
 use secp256k1_zkp::EcdsaAdaptorSignature;
 
@@ -33,6 +33,7 @@ pub struct AcceptedContract {
 }
 
 /// An AcceptedLoanContract represents a loan contract in the accepted state.
+#[derive(Clone)]
 pub struct AcceptedLoanContract {
         /// The offered loan contract that was accepted.
         pub offered_loan_contract: OfferedLoanContract,
@@ -148,28 +149,34 @@ impl AcceptedLoanContract {
         string_id
     }
 
-    // pub(crate) fn get_accept_contract_msg(
-    //     &self,
-    //     ecdsa_adaptor_signatures: &[EcdsaAdaptorSignature],
-    // ) -> AcceptLoanDlc {
-    //     AcceptLoanDlc {
-    //         protocol_version: crate::conversion_utils::PROTOCOL_VERSION,
-    //         temporary_contract_id: self.offered_loan_contract.offered_contract.id,
-    //         accept_collateral: self.accept_params.collateral,
-    //         funding_pubkey: self.accept_params.fund_pubkey,
-    //         payout_spk: self.accept_params.payout_script_pubkey.clone(),
-    //         payout_serial_id: self.accept_params.payout_serial_id,
-    //         funding_inputs: self.funding_inputs.clone(),
-    //         change_spk: self.accept_params.change_script_pubkey.clone(),
-    //         change_serial_id: self.accept_params.change_serial_id,
-    //         cet_adaptor_signatures: ecdsa_adaptor_signatures.into(),
-    //         refund_signature: self.accept_refund_signature,
-    //         negotiation_fields: None,
-    //         escrow_txid: self.escrow_txid, 
-    //         borrower_hash: self.borrower_hash,
-    //         signed_escrow_spend_tx: self.signed_escrow_spend_tx.clone(),
-    //     }
-    // }
+    pub(crate) fn get_accept_contract_msg(
+        &self,
+        ecdsa_adaptor_signatures: &[EcdsaAdaptorSignature],
+        escrow_amount: Amount,
+        escrow_spk: &bitcoin::Script,
+        collateral_spk: &bitcoin::Script,
+    ) -> AcceptLoanDlc {
+        AcceptLoanDlc {
+            protocol_version: crate::conversion_utils::PROTOCOL_VERSION,
+            temporary_contract_id: self.offered_loan_contract.offered_contract.id,
+            accept_collateral: self.accept_params.collateral,
+            funding_pubkey: self.accept_params.fund_pubkey,
+            payout_spk: self.accept_params.payout_script_pubkey.clone(),
+            payout_serial_id: self.accept_params.payout_serial_id,
+            funding_inputs: self.funding_inputs.clone(),
+            change_spk: self.accept_params.change_script_pubkey.clone(),
+            change_serial_id: self.accept_params.change_serial_id,
+            cet_adaptor_signatures: ecdsa_adaptor_signatures.into(),
+            refund_signature: self.accept_refund_signature,
+            negotiation_fields: None,
+            escrow_txid: self.escrow_txid, 
+            borrower_hash: self.borrower_hash,
+            signed_escrow_spend_tx: self.signed_escrow_spend_tx.clone(),
+            escrow_amount,
+            escrow_spk: escrow_spk.into(),
+            collateral_spk: collateral_spk.into(),
+        }
+    }
 
     /// Compute the profit and loss for this contract and an assciated cet index
     pub fn compute_pnl(&self, cet: &Transaction) -> Result<SignedAmount, Error> {
@@ -194,6 +201,18 @@ impl AcceptedLoanContract {
             .unwrap_or(Amount::ZERO);
         Ok(final_payout.to_signed().map_err(|_| Error::OutOfRange)?
             - collateral.to_signed().map_err(|_| Error::OutOfRange)?)
+    }
+    /// Convert the AcceptedLoanContract to an AcceptedContract
+    pub fn to_accepted_contract(self) -> AcceptedContract {
+        AcceptedContract {
+            offered_contract: self.offered_loan_contract.offered_contract,
+            accept_params: self.accept_params,
+            funding_inputs: self.funding_inputs,
+            adaptor_infos: self.adaptor_infos,
+            adaptor_signatures: self.adaptor_signatures,
+            accept_refund_signature: self.accept_refund_signature,
+            dlc_transactions: self.dlc_transactions,
+        }
     }
 }
     

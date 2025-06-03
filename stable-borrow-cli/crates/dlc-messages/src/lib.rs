@@ -564,6 +564,29 @@ pub struct AcceptLoanDlc {
     pub escrow_amount: Amount,
     /// Escrow script pubkey
     pub escrow_spk: ScriptBuf,
+    /// Collateral script pubkey
+    pub collateral_spk: ScriptBuf,
+}
+
+impl AcceptLoanDlc {
+    /// Converts the `AcceptLoanDlc` into an `AcceptDlc` message.
+    pub fn to_accept_dlc(self) -> AcceptDlc {
+        AcceptDlc {
+            protocol_version: self.protocol_version,
+            temporary_contract_id: self.temporary_contract_id,
+            accept_collateral: self.accept_collateral,
+            funding_pubkey: self.funding_pubkey,
+            payout_spk: self.payout_spk,
+            payout_serial_id: self.payout_serial_id,
+            funding_inputs: self.funding_inputs,
+            change_spk: self.change_spk,
+            change_serial_id: self.change_serial_id,
+            cet_adaptor_signatures: self.cet_adaptor_signatures,
+            refund_signature: self.refund_signature,
+            negotiation_fields: self.negotiation_fields,
+        }
+    }
+
 }
 
 impl_dlc_writeable!(AcceptLoanDlc, {
@@ -583,7 +606,8 @@ impl_dlc_writeable!(AcceptLoanDlc, {
     (borrower_hash, writeable),
     (signed_escrow_spend_tx, writeable),
     (escrow_amount, writeable),
-    (escrow_spk, writeable)
+    (escrow_spk, writeable),
+    (collateral_spk, writeable)
 });
 
 /// Contains all the required signatures for the DLC transactions from the offering
