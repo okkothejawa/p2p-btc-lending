@@ -1,5 +1,5 @@
 {
-  "collateral": 10000000,
+  "collateral": 10000,
   "collateralRatio": 150,
   "liquidationRatio": 125,
   "interestRate": 1,
@@ -14,7 +14,7 @@
               {
                 "hyperbolaPayoutCurvePiece": {
                   "leftEndPoint": {
-                    "eventOutcome": 1,
+                    "eventOutcome": 5,
                     "outcomePayout": 0,
                     "extraPrecision": 0
                   },
@@ -29,7 +29,7 @@
                   "a": 1.0,
                   "b": 0.0,
                   "c": 0.0,
-                  "d": 90000 
+                  "d": 50000 
                 }
               }
             ]
@@ -53,7 +53,7 @@
         "publicKeys": [
           "0d829c1cc556aa59060df5a9543c5357199ace5db9bcd5a8ddd6ee2fc7b6d174"
         ],
-        "eventId": "btcusd1748997947",
+        "eventId": "btcusd1749547379",
         "threshold": 1
       }
     }

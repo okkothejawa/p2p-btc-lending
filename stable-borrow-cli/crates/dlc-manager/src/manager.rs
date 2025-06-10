@@ -775,6 +775,7 @@ where
         let borrower_hash = primitives::FixedBytes::from(initiate_accept_msg.borrower_hash);
         let collateral_sat = primitives::U256::from(collateral_amount.to_sat());
         
+        println!("lendStable arguments {} {}", borrower_hash, collateral_sat);
         let lend_stable = lending_contract.lendStable(borrower_hash, collateral_sat);
         let lend_stable_tx = lend_stable.send()
             .await

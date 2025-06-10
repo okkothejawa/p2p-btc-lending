@@ -41,4 +41,4 @@ api:
         nbDigits: 20
 datafeed:
   dummy:
-    returnValue: 9000
+    returnValue: 5

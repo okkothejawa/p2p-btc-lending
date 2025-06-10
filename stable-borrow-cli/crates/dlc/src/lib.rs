@@ -706,13 +706,13 @@ pub fn create_cet(
     fund_tx_in: &TxIn,
     lock_time: u32,
 ) -> Transaction {
-    let output: Vec<TxOut> = if offer_payout_serial_id < accept_payout_serial_id {
+    let mut output: Vec<TxOut> = if offer_payout_serial_id < accept_payout_serial_id {
         vec![offer_output, accept_output]
     } else {
         vec![accept_output, offer_output]
     };
 
-    // output = util::discard_dust(output, DUST_LIMIT);
+    output = util::discard_dust(output, DUST_LIMIT);
 
     Transaction {
         version: TX_VERSION,
